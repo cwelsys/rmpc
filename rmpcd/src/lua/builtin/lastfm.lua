@@ -109,7 +109,6 @@ end
 ---@param token string
 ---@return string|nil session_key
 local function get_session_key(api_key, shared_secret, token)
-    log.info("Waiting for browser auth...")
     local params = {
         api_key = api_key,
         method = "auth.getSession",
@@ -331,18 +330,24 @@ M.setup = function(self, args)
         log.warn("Couldn't open a browser. To authorize Last.fm, visit: " .. auth_url)
     end
 
-    local session_key = get_session_key(args.api_key, args.shared_secret, token)
-    if session_key ~= nil then
-        persist_session(self, session_key)
-    else
-        sync.set_interval(5000, function(handle)
-            local sk = get_session_key(args.api_key, args.shared_secret, token)
-            if sk ~= nil then
-                handle.cancel()
-                persist_session(self, sk)
-            end
-        end)
-    end
+    log.info("Waiting for Last.fm authorization (up to 5 minutes); authorize at: " .. auth_url)
+
+    local poll_interval_ms = 5000
+    local max_attempts = math.floor((5 * 60 * 1000) / poll_interval_ms)
+    local attempts = 0
+    sync.set_interval(poll_interval_ms, function(handle)
+        attempts = attempts + 1
+        local sk = get_session_key(args.api_key, args.shared_secret, token)
+        if sk ~= nil then
+            handle.cancel()
+            persist_session(self, sk)
+            log.info("Last.fm authorized")
+        elseif attempts >= max_attempts then
+            handle.cancel()
+            self.enabled = false
+            log.warn("Last.fm authorization timed out after 5 minutes; plugin disabled. To authorize, visit: " .. auth_url .. " then restart rmpcd.")
+        end
+    end)
 end
 
 M.song_change = function(self, old, new)
