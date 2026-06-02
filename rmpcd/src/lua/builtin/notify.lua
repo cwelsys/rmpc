@@ -36,9 +36,9 @@ end
 local function notify_debounced(_new_song, _with_album_art, _album_art_path) end
 
 M.setup = function(self, args)
-    self.with_album_art = (args.with_album_art ~= nil) and args.with_album_art or true
+    self.with_album_art = args.with_album_art ~= false
     self.album_art_path = args.album_art_path or "/tmp/rmpcd-notify-album-art"
-    self.enabled = (args.enabled ~= nil) and args.enabled or true
+    self.enabled = args.enabled ~= false
 
     local notify_send = util.which("notify-send")
     if not notify_send then

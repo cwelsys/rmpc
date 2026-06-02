@@ -4,7 +4,7 @@ local M = {
 }
 
 M.setup = function(_self, args)
-    _self.enabled = (args.enabled ~= nil) and args.enabled or true
+    _self.enabled = args.enabled ~= false
 end
 
 M.subscribed_channels = { "rmpcd.playcount" }
