@@ -1,6 +1,16 @@
 use mlua::{ExternalError, IntoLuaMulti, Lua, Table, Value};
 use tracing::error;
 
+async fn write_secret_impl(path: &str, contents: &str) -> std::io::Result<()> {
+    tokio::fs::write(path, contents).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await?;
+    }
+    Ok(())
+}
+
 pub fn create(lua: &Lua) -> mlua::Result<Table> {
     let tbl = lua.create_table()?;
 
@@ -51,6 +61,17 @@ pub fn create(lua: &Lua) -> mlua::Result<Table> {
                 Ok(()) => true.into_lua_multi(&lua),
                 Err(err) => {
                     error!(err = ?err, "Failed to write file");
+                    (false, err.into_lua_err()).into_lua_multi(&lua)
+                }
+            }
+        })?;
+
+    let write_secret =
+        lua.create_async_function(async |lua, (path, contents): (String, String)| {
+            match write_secret_impl(&path, &contents).await {
+                Ok(()) => true.into_lua_multi(&lua),
+                Err(err) => {
+                    error!(err = ?err, "Failed to write secret file");
                     (false, err.into_lua_err()).into_lua_multi(&lua)
                 }
             }
@@ -111,6 +132,7 @@ pub fn create(lua: &Lua) -> mlua::Result<Table> {
     tbl.raw_set("create_dir", create_dir)?;
     tbl.raw_set("write", write)?;
     tbl.raw_set("write_str", write_str)?;
+    tbl.raw_set("write_secret", write_secret)?;
     tbl.raw_set("read", read)?;
     tbl.raw_set("read_str", read_str)?;
     tbl.raw_set("delete", delete)?;
@@ -118,4 +140,28 @@ pub fn create(lua: &Lua) -> mlua::Result<Table> {
     tbl.raw_set("remove_dir_all", remove_dir_all)?;
 
     Ok(tbl)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::write_secret_impl;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_secret_writes_contents_and_sets_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path =
+            std::env::temp_dir().join(format!("rmpcd_write_secret_test_{}", std::process::id()));
+        let path_str = path.to_str().unwrap();
+
+        write_secret_impl(path_str, "topsecret").await.unwrap();
+
+        let meta = std::fs::metadata(&path).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "topsecret");
+
+        std::fs::remove_file(&path).unwrap();
+    }
 }
