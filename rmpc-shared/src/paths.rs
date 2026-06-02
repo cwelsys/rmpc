@@ -85,6 +85,35 @@ pub fn theme_paths(
     ]
 }
 
+#[cfg(test)]
+#[cfg(feature = "test-impl")]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::rmpcd_data_dir;
+    use crate::env::ENV;
+
+    #[test]
+    fn rmpcd_data_dir_uses_xdg_data_home() {
+        let _lock = ENV.lock();
+
+        ENV.clear();
+        ENV.set("XDG_DATA_HOME".to_string(), "/xdg/data".to_string());
+        assert_eq!(rmpcd_data_dir(), Some(PathBuf::from("/xdg/data/rmpcd")));
+    }
+
+    #[test]
+    fn rmpcd_data_dir_falls_back_to_home_local_share() {
+        let _lock = ENV.lock();
+
+        ENV.clear();
+        ENV.remove("XDG_DATA_HOME");
+        ENV.set("HOME".to_string(), "/home/some_user".to_string());
+        assert_eq!(rmpcd_data_dir(), Some(PathBuf::from("/home/some_user/.local/share/rmpcd")));
+    }
+}
+
 pub mod utils {
     use std::{
         borrow::Cow,
