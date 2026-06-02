@@ -54,11 +54,23 @@ local function lastfm_api_sig(params, shared_secret)
     return util.md5(base)
 end
 
+---@return boolean
+local function is_invalid_session(resp)
+    if resp == nil then
+        return false
+    end
+    local ok, body = pcall(function()
+        return resp:json()
+    end)
+    return ok and body ~= nil and body.error == 9
+end
+
 ---@param api_key string
 ---@param shared_secret string
 ---@param session_key string
 ---@param song Song
 ---@param duration_seconds? number
+---@return boolean invalid_session
 local function lastfm_update_now_playing(api_key, shared_secret, session_key, song, duration_seconds)
     local params = {
         method = "track.updateNowPlaying",
@@ -101,7 +113,9 @@ local function lastfm_update_now_playing(api_key, shared_secret, session_key, so
 
     if resp.code ~= 200 then
         log.error("Last.fm updateNowPlaying failed: HTTP " .. resp.code)
+        return is_invalid_session(resp)
     end
+    return false
 end
 
 ---@param api_key string
@@ -191,7 +205,7 @@ end
 ---@param shared_secret string
 ---@param old_song Song
 ---@param song_start integer
----@return boolean
+---@return "ok" | "failed" | "invalid_session"
 local function scrobble(api_key, session_key, shared_secret, old_song, song_start)
     local params = {
         method = "track.scrobble",
@@ -228,17 +242,21 @@ local function scrobble(api_key, session_key, shared_secret, old_song, song_star
 
     if resp.code ~= 200 then
         log.error("Last.fm scrobble failed: HTTP " .. resp.code)
-        return false
-    else
-        log.info("Scrobbled: " .. old_song.file)
-        return true
+        if is_invalid_session(resp) then
+            return "invalid_session"
+        end
+        return "failed"
     end
+
+    log.info("Scrobbled: " .. old_song.file)
+    return "ok"
 end
 
 ---@param api_key string
 ---@param session_key string
 ---@param shared_secret string
 ---@param scrobble_queue Deque<{ song: Song, timestamp: integer }>
+---@return "invalid_session" | nil
 local function process_scrobble_queue(api_key, session_key, shared_secret, scrobble_queue)
     log.info("Processing scrobble queue with " .. (scrobble_queue.last - scrobble_queue.first + 1) .. " items")
     while true do
@@ -247,15 +265,19 @@ local function process_scrobble_queue(api_key, session_key, shared_secret, scrob
             break
         end
 
-        local scrobbled = scrobble(api_key, session_key, shared_secret, item.song, item.timestamp)
-        if scrobbled then
+        local status = scrobble(api_key, session_key, shared_secret, item.song, item.timestamp)
+        if status == "ok" then
             scrobble_queue:pop_left()
+        elseif status == "invalid_session" then
+            log.info("Finished processing scrobble queue")
+            return "invalid_session"
         else
-            log.error("Failed to scrobble, sopping processing of scrobble queue for now")
+            log.error("Failed to scrobble, stopping processing of scrobble queue for now")
             break
         end
     end
     log.info("Finished processing scrobble queue")
+    return nil
 end
 
 ---@param song_start integer
@@ -287,6 +309,20 @@ local function should_scrobble(song_start, current_time, song)
     end
 
     return false
+end
+
+---@param self LastFmPlugin
+local function handle_revoked_session(self)
+    self.session_key = nil
+    self.enabled = false
+
+    local key_path = session_key_path()
+    if key_path ~= nil then
+        fs.delete(key_path)
+    end
+
+    log.warn("Last.fm session key was rejected; cleared it and disabled scrobbling. Restart rmpcd to re-authorize.")
+    util.notify("Last.fm", "Session key was rejected. Restart rmpcd to re-authorize.")
 end
 
 M.setup = function(self, args)
@@ -356,7 +392,10 @@ M.song_change = function(self, old, new)
     end
 
     if new ~= nil and (self.update_now_playing or false) then
-        lastfm_update_now_playing(self.api_key, self.shared_secret, self.session_key, new, math.floor(new.duration / 1000))
+        if lastfm_update_now_playing(self.api_key, self.shared_secret, self.session_key, new, math.floor(new.duration / 1000)) then
+            handle_revoked_session(self)
+            return
+        end
     end
 
     local current_time = os.time()
@@ -371,7 +410,9 @@ M.song_change = function(self, old, new)
     self.song_start = current_time
     self.current_song = new
 
-    process_scrobble_queue(self.api_key, self.session_key, self.shared_secret, self.scrobble_queue)
+    if process_scrobble_queue(self.api_key, self.session_key, self.shared_secret, self.scrobble_queue) == "invalid_session" then
+        handle_revoked_session(self)
+    end
 end
 
 M.state_change = function(self, old, new)
@@ -397,7 +438,9 @@ M.state_change = function(self, old, new)
         self.current_song = nil
     end
 
-    process_scrobble_queue(self.api_key, self.session_key, self.shared_secret, self.scrobble_queue)
+    if process_scrobble_queue(self.api_key, self.session_key, self.shared_secret, self.scrobble_queue) == "invalid_session" then
+        handle_revoked_session(self)
+    end
 end
 
 M.subscribed_channels = { "rmpcd.lastfm" }
