@@ -11,9 +11,10 @@ local M = {
 local function notify(new_song, with_album_art, album_art_path)
     local artist = (new_song.artist and new_song.artist:first()) or "Unknown Artist"
     local title = (new_song.title and new_song.title:first()) or "Unknown Title"
+    local body = artist .. " - " .. title
 
     if not with_album_art then
-        process.spawn({ "notify-send", "Now playing: " .. artist .. " - " .. title })
+        util.notify("Now playing", body)
         return
     end
 
@@ -23,10 +24,10 @@ local function notify(new_song, with_album_art, album_art_path)
     end
 
     if err ~= nil or bytes == nil then
-        process.spawn({ "notify-send", "Now playing: " .. artist .. " - " .. title })
+        util.notify("Now playing", body)
     else
         fs.write(album_art_path, bytes)
-        process.spawn({ "notify-send", "-i", album_art_path, "Now playing: " .. artist .. " - " .. title })
+        util.notify("Now playing", body, { icon = album_art_path })
     end
 end
 
@@ -39,12 +40,6 @@ M.setup = function(self, args)
     self.with_album_art = (args.with_album_art ~= nil) and args.with_album_art or true
     self.album_art_path = args.album_art_path or "/tmp/rmpcd-notify-album-art"
     self.enabled = (args.enabled ~= nil) and args.enabled or true
-
-    local notify_send = util.which("notify-send")
-    if not notify_send then
-        log.error("notify-send not found in PATH, disabling notify plugin")
-        self.enabled = false
-    end
 
     local debounce_delay = args.debounce_delay or 1000
     if debounce_delay < 0 then
