@@ -1,6 +1,7 @@
 use std::{collections::HashSet, fmt::Write};
 
 use mlua::{ExternalError, IntoLuaMulti, Lua, LuaSerdeExt, Table, Value};
+use rmpc_shared::paths::rmpcd_data_dir;
 use tracing::info;
 
 pub fn create(lua: &Lua) -> mlua::Result<Table> {
@@ -46,11 +47,19 @@ pub fn create(lua: &Lua) -> mlua::Result<Table> {
         (val, Value::Nil).into_lua_multi(lua)
     })?;
 
+    let open_url = lua.create_function(|_, url: String| Ok(open::that_detached(url).is_ok()))?;
+
+    let data_dir = lua.create_function(|_, ()| {
+        Ok(rmpcd_data_dir().and_then(|p| p.to_str().map(str::to_owned)))
+    })?;
+
     tbl.set("dump_table", dump_table)?;
     tbl.set("md5", md5)?;
     tbl.set("which", which)?;
     tbl.set("nil_or_null", nil_or_null)?;
     tbl.set("deserialize_ron", deserialize_ron)?;
+    tbl.set("open_url", open_url)?;
+    tbl.set("data_dir", data_dir)?;
 
     Ok(tbl)
 }
