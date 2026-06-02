@@ -8,8 +8,8 @@
 
 ---@type Config
 local config = {
-    -- Point rmpcd to your mpd server
-    address = "127.0.0.1:6600",
+	-- Point rmpcd to your mpd server
+	address = "127.0.0.1:6600",
 }
 
 -- Enable mpris support
@@ -25,6 +25,7 @@ local config = {
 -- 	api_key = "<your api key>",
 -- 	shared_secret = "<your shared secret key>",
 -- 	update_now_playing = false,
+-- 	enabled = true,
 -- })
 
 -- Install notification on song change builtin

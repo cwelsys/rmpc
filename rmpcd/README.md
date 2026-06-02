@@ -64,6 +64,7 @@ rmpcd.install("#builtin.lastfm"):setup({
 	api_key = "<your api key here>",
 	shared_secret = "<your secret here>",
 	update_now_playing = false,
+	enabled = true,
 })
 
 -- Install notification on song change builtin
