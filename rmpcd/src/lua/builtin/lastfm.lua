@@ -271,12 +271,13 @@ local function should_scrobble(song_start, current_time, song)
         return false
     end
 
-    if song.duration < min_scrobble_duration then
+    local song_duration_secs = math.floor(song.duration / 1000)
+
+    if song_duration_secs < min_scrobble_duration then
         return false
     end
 
     local elapsed_secs = current_time - song_start
-    local song_duration_secs = math.floor(song.duration / 1000)
 
     if elapsed_secs >= min_scrobble_time_secs then
         return true
@@ -350,7 +351,7 @@ M.song_change = function(self, old, new)
     end
 
     if new ~= nil and (self.update_now_playing or false) then
-        lastfm_update_now_playing(self.api_key, self.shared_secret, self.session_key, new, new.duration)
+        lastfm_update_now_playing(self.api_key, self.shared_secret, self.session_key, new, math.floor(new.duration / 1000))
     end
 
     local current_time = os.time()
