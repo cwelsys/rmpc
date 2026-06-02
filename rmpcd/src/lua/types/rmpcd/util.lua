@@ -8,6 +8,7 @@
 ---@field deserialize_ron fun(value: number[]): (any | nil, string | nil)
 ---@field open_url fun(url: string): boolean
 ---@field data_dir fun(): string | nil
+---@field notify fun(summary: string, body?: string, opts?: { icon?: string }): boolean
 
 ---@type Util
 ---@diagnostic disable-next-line: lowercase-global
