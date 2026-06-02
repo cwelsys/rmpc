@@ -52,7 +52,7 @@ async fn do_call(lua: Lua, url: &str, opts: Option<RequestOpts>) -> mlua::Result
     let result = lua.create_table()?;
 
     trace!(?client, "Sending HTTP request");
-    let response = match client.send().await.and_then(|r| r.error_for_status()) {
+    let response = match client.send().await {
         Ok(resp) => resp,
         Err(e) => {
             error!("HTTP request failed: {e}");
