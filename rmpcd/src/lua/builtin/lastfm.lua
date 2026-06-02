@@ -2,6 +2,40 @@
 ---@diagnostic disable-next-line: missing-fields
 local M = {}
 
+---@return string|nil key_path
+---@return string|nil key_dir
+local function session_key_path()
+    local data_dir = util.data_dir()
+    if data_dir == nil then
+        return nil, nil
+    end
+    local key_dir = data_dir .. "/lastfm"
+    return key_dir .. "/session-key", key_dir
+end
+
+---@param self LastFmPlugin
+---@param session_key string
+local function persist_session(self, session_key)
+    self.session_key = session_key
+
+    local key_path, key_dir = session_key_path()
+    if key_path == nil then
+        log.warn("Could not resolve data dir; Last.fm session key will not be cached (re-auth required on next start)")
+        return
+    end
+
+    local _, mkdir_err = fs.create_dir_all(key_dir)
+    if mkdir_err ~= nil then
+        log.error("Failed to create Last.fm data dir: " .. tostring(mkdir_err))
+        return
+    end
+
+    local _, write_err = fs.write_secret(key_path, session_key)
+    if write_err ~= nil then
+        log.error("Failed to write Last.fm session key: " .. tostring(write_err))
+    end
+end
+
 local function lastfm_api_sig(params, shared_secret)
     local keys = {}
     for k, _ in pairs(params) do
@@ -86,13 +120,17 @@ local function get_session_key(api_key, shared_secret, token)
     params.api_sig = lastfm_api_sig(params, shared_secret)
 
     local session_response = http.get("https://ws.audioscrobbler.com/2.0/", { params = params })
-    util.dump_table(session_response)
 
-    if session_response.code == 200 then
-        return session_response:json().session.key
+    if session_response.code ~= 200 then
+        return nil
     end
 
-    return nil
+    local body = session_response:json()
+    if body == nil or body.session == nil then
+        return nil
+    end
+
+    return body.session.key
 end
 
 ---@class Deque<T>
@@ -257,22 +295,18 @@ M.setup = function(self, args)
     self.update_now_playing = (args.update_now_playing ~= nil) and args.update_now_playing or false
     self.enabled = (args.update_now_playing ~= nil) and args.enabled or true
 
-    local xdg_open = util.which("xdg-open")
-    if not xdg_open then
-        log.error("xdg-open not found in PATH, disabling lastfm plugin")
-        self.enabled = false
-    end
-
     self.scrobble_queue = Deque.new()
 
-    local cached_session_key, err = fs.read_str("/tmp/rmpcd-lastfm-session-key")
-    if cached_session_key ~= nil and err == nil then
-        log.info("Using cached Last.fm session key")
-        self.session_key = cached_session_key
-        return
-    else
-        log.info("No cached Last.fm session key found, starting auth flow")
+    local key_path = session_key_path()
+    if key_path ~= nil then
+        local cached_session_key, err = fs.read_str(key_path)
+        if cached_session_key ~= nil and err == nil then
+            log.info("Using cached Last.fm session key")
+            self.session_key = cached_session_key
+            return
+        end
     end
+    log.info("No cached Last.fm session key found, starting auth flow")
 
     local response = http.get("https://ws.audioscrobbler.com/2.0", {
         params = {
@@ -289,21 +323,22 @@ M.setup = function(self, args)
 
     local token = response:json().token
 
-    process.spawn({ "xdg-open", "https://www.last.fm/api/auth/?api_key=" .. args.api_key .. "&token=" .. token })
+    local auth_url = "https://www.last.fm/api/auth/?api_key=" .. args.api_key .. "&token=" .. token
+    if util.open_url(auth_url) then
+        log.warn("Opening your browser to authorize Last.fm. If it didn't open, visit: " .. auth_url)
+    else
+        log.warn("Couldn't open a browser. To authorize Last.fm, visit: " .. auth_url)
+    end
 
     local session_key = get_session_key(args.api_key, args.shared_secret, token)
-    if session_key == nil then
+    if session_key ~= nil then
+        persist_session(self, session_key)
+    else
         sync.set_interval(5000, function(handle)
-            session_key = get_session_key(args.api_key, args.shared_secret, token)
-
-            if session_key ~= nil then
+            local sk = get_session_key(args.api_key, args.shared_secret, token)
+            if sk ~= nil then
                 handle.cancel()
-                local _, sk_write_err = fs.write_str("/tmp/rmpcd-lastfm-session-key", session_key)
-                if sk_write_err ~= nil then
-                    log.error("Failed to write Last.fm session key to file: " .. sk_write_err)
-                end
-
-                self.session_key = session_key
+                persist_session(self, sk)
             end
         end)
     end
