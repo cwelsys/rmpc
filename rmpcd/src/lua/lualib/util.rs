@@ -53,6 +53,28 @@ pub fn create(lua: &Lua) -> mlua::Result<Table> {
         Ok(rmpcd_data_dir().and_then(|p| p.to_str().map(str::to_owned)))
     })?;
 
+    let notify = lua.create_async_function(
+        |_, (summary, body, opts): (String, Option<String>, Option<Table>)| async move {
+            let icon = opts.map(|o| o.get::<Option<String>>("icon")).transpose()?.flatten();
+
+            let shown = tokio::task::spawn_blocking(move || {
+                let mut notification = notify_rust::Notification::new();
+                notification.summary(&summary);
+                if let Some(body) = body {
+                    notification.body(&body);
+                }
+                if let Some(icon) = icon {
+                    notification.icon(&icon);
+                }
+                notification.show().is_ok()
+            })
+            .await
+            .unwrap_or(false);
+
+            Ok(shown)
+        },
+    )?;
+
     tbl.set("dump_table", dump_table)?;
     tbl.set("md5", md5)?;
     tbl.set("which", which)?;
@@ -60,6 +82,7 @@ pub fn create(lua: &Lua) -> mlua::Result<Table> {
     tbl.set("deserialize_ron", deserialize_ron)?;
     tbl.set("open_url", open_url)?;
     tbl.set("data_dir", data_dir)?;
+    tbl.set("notify", notify)?;
 
     Ok(tbl)
 }
